@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sales Revenue Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <h1>Sales Revenue Dashboard</h1>
+    <div class="sub" id="syncInfo">กำลังเชื่อมต่อ...</div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <span class="badge demo" id="demoBadge" style="display:none;">ข้อมูลตัวอย่าง (Demo)</span>
+    <button class="btn ghost sm" id="refreshBtn" onclick="manualRefresh()">🔄 รีเฟรชข้อมูล</button>
+    <button class="btn ghost sm" onclick="toggleDatasource()">📁 อัปโหลดไฟล์ (สำรอง)</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div id="datasource" class="card" style="display:none;margin-bottom:14px;">
+    <div class="panel-title"><span>อัปโหลดไฟล์สำรอง (Manual Upload)</span></div>
+    <div class="note">
+      ข้อมูลหลักของแดชบอร์ดจะถูกดึงมาจาก Google Drive โดยอัตโนมัติผ่าน Google Apps Script (ดู README.md)
+      แท็บนี้ใช้สำหรับทดสอบไฟล์เพิ่มเติมด้วยตนเองเท่านั้น — ไฟล์ที่อัปโหลดจะถูกรวมกับข้อมูลจาก Drive ชั่วคราว
+      และจะหายไปเมื่อรีเฟรชหน้าเว็บ
+    </div>
+    <div id="dropzone">
+      ลากไฟล์ .xlsx / .csv มาวางที่นี่ หรือ
+      <label class="btn sm" style="cursor:pointer;display:inline-block;margin-left:6px;">
+        เลือกไฟล์
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple style="display:none;">
+      </label>
+    </div>
+    <div id="ingestLog" style="margin-top:10px;"></div>
+  </div>
+
+  <div id="filters">
+    <div class="field"><label>ช่วงเวลา</label>
+      <div style="display:flex;gap:6px;">
+        <input type="date" id="fStart"><input type="date" id="fEnd">
+      </div>
+    </div>
+    <div class="field"><label>ปุ่มลัด</label>
+      <select id="fQuick" onchange="applyQuickRange()">
+        <option value="">กำหนดเอง</option>
+        <option value="this_year">This Year</option>
+        <option value="last_year">Last Year</option>
+        <option value="last12">Last 12 Months</option>
+        <option value="all">ทั้งหมด</option>
+      </select>
+    </div>
+    <div class="field"><label>ปี</label><div class="msbox" id="msYear"></div></div>
+    <div class="field"><label>ช่องทาง</label><div class="msbox" id="msChannel"></div></div>
+    <div class="field"><label>หมวดหมู่</label><div class="msbox" id="msCategory"></div></div>
+    <div class="field"><label>สินค้า</label><div class="msbox" id="msProduct"></div></div>
+    <div class="field"><label>สถานะ</label><div class="msbox" id="msStatus"></div></div>
+    <button class="btn" onclick="resetFilters()">Reset Filters</button>
+  </div>
+
+  <section class="grid-4" id="kpiRow"></section>
+
+  <section class="card">
+    <div class="panel-title">
+      <span>แนวโน้มยอดขายรายเดือน (Revenue Trend)</span>
+      <div class="chart-toggle" id="trendToggle">
+        <button class="on" data-mode="total" onclick="setTrendMode('total')">รวมทั้งหมด</button>
+        <button data-mode="channel" onclick="setTrendMode('channel')">แยกช่องทาง</button>
+        <button data-mode="category" onclick="setTrendMode('category')">แยกหมวดหมู่</button>
+      </div>
+    </div>
+    <div style="position:relative;height:280px;"><canvas id="trendChart" role="img" aria-label="กราฟเส้นแนวโน้มยอดขายรายเดือน"></canvas></div>
+    <div class="legend" id="trendLegend"></div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <div class="panel-title"><span>ยอดขายแยกตามช่องทาง</span></div>
+      <div style="position:relative;height:220px;"><canvas id="channelBar" role="img" aria-label="กราฟแท่งยอดขายตามช่องทาง"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="panel-title"><span>สัดส่วนช่องทาง</span></div>
+      <div style="position:relative;height:220px;"><canvas id="channelDonut" role="img" aria-label="กราฟโดนัทสัดส่วนยอดขายตามช่องทาง"></canvas></div>
+    </div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <div class="panel-title"><span>ยอดขายแยกตามหมวดหมู่สินค้า</span></div>
+      <div style="position:relative;height:230px;"><canvas id="categoryBar" role="img" aria-label="กราฟแท่งยอดขายตามหมวดหมู่"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <div class="panel-title" style="margin:0;"><span>Top Products</span></div>
+        <div style="display:flex;gap:8px;">
+          <select id="topN" onchange="renderTopProducts()"><option>5</option><option selected>10</option><option>20</option></select>
+          <input type="search" id="prodSearch" placeholder="ค้นหาสินค้า/รหัส" oninput="renderTopProducts()">
+        </div>
+      </div>
+      <div class="tblwrap"><table class="data" id="topProductsTbl"></table></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="panel-title"><span>กราฟเปรียบเทียบ (เลือกได้เอง สูงสุด 5 รายการ)</span></div>
+    <div class="field-row">
+      <div class="field"><label>เปรียบเทียบตาม</label>
+        <select id="compMode" onchange="rebuildCompList()">
+          <option value="channel">ช่องทาง</option>
+          <option value="category">หมวดหมู่</option>
+          <option value="product">สินค้า</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;"><label>เลือกรายการ (สูงสุด 5)</label>
+        <input class="msearch" id="compSearch" placeholder="ค้นหา..." oninput="rebuildCompList()">
+        <div class="comp-list" id="compList"></div>
+      </div>
+    </div>
+    <div style="position:relative;height:260px;"><canvas id="compChart" role="img" aria-label="กราฟเส้นเปรียบเทียบยอดขาย"></canvas></div>
+  </section>
+
+  <section class="grid-2">
+    <div class="card">
+      <div class="panel-title"><span>Heatmap ยอดขายตามเดือน x ปี</span></div>
+      <div id="heatmapWrap"></div>
+    </div>
+    <div class="card">
+      <div class="panel-title"><span>สัดส่วนสถานะการชำระเงิน</span></div>
+      <div style="position:relative;height:220px;"><canvas id="statusDonut" role="img" aria-label="กราฟโดนัทสถานะการชำระเงิน"></canvas></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <div class="panel-title" style="margin:0;"><span>ตารางรายละเอียด (Detail Table)</span></div>
+      <div style="display:flex;gap:8px;">
+        <input type="search" id="detailSearch" placeholder="ค้นหาเลขที่เอกสาร/สินค้า/ลูกค้า" oninput="renderDetailTable()">
+        <button class="btn sm" onclick="exportCSV()">Export CSV</button>
+      </div>
+    </div>
+    <div class="tblwrap"><table class="data" id="detailTbl"></table></div>
+    <div class="pager">
+      <button class="btn sm" onclick="pageStep(-1)">‹ ก่อนหน้า</button>
+      <span id="pageInfo"></span>
+      <button class="btn sm" onclick="pageStep(1)">ถัดไป ›</button>
+    </div>
+  </section>
+
+  <div style="margin-top:20px;font-size:11.5px;color:var(--text-mut);">
+    ข้อมูลจริงซิงก์อัตโนมัติจาก Google Drive ผ่าน Google Apps Script (ไม่มีการฝัง API Key ในฝั่ง Client) · ดูวิธีตั้งค่าที่ README.md
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
