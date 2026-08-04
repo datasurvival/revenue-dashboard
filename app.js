@@ -30,11 +30,11 @@ const OPTIONAL = [
 const TEXT_FALLBACK = ['category','channel','customer','status'];
 const MAX_BAD_ROW_RATIO = 0.2; // reject whole file if >20% rows fail to coerce
 const SERIES = ['#2a78d6','#e8792a','#1baf7a','#eda100','#e87ba4','#3a8a3a','#6a4ab7','#e34948'];
-const TH_MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-// '2024-01' -> 'ม.ค. 2024'
+const TH_MONTHS_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+// '2024-01' -> 'มกราคม 2024'
 function formatYearMonth(ym){
   const [y,m] = String(ym).split('-');
-  return TH_MONTHS_SHORT[parseInt(m,10)-1] + ' ' + y;
+  return TH_MONTHS_FULL[parseInt(m,10)-1] + ' ' + y;
 }
 const LS_KEY = 'salesDashboard_cache_v1'; // localStorage key for the last successfully-synced dataset
 
@@ -339,7 +339,7 @@ function buildMultiSelect(containerId, options, selectedSet, onChange, withSearc
 document.addEventListener('click', ()=>document.querySelectorAll('.msbox.open').forEach(b=>b.classList.remove('open')));
 
 function refreshFilterOptions(){
-  const years = [...new Set(masterData.map(r=>r.year))].sort();
+  const years = [...new Set(masterData.map(r=>r.year))].sort((a,b)=>a-b);
   const channels = [...new Set(masterData.map(r=>r.channel))].sort();
   const categories = [...new Set(masterData.map(r=>r.category))].sort();
   const statuses = [...new Set(masterData.map(r=>r.status))].sort();
@@ -456,13 +456,13 @@ function renderTrend(){
   const months = [...new Set(data.map(r=>r.year_month))].sort();
   let datasets = [];
   if(trendMode==='total'){
-    const years = [...new Set(data.map(r=>r.year))].sort();
+    const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
     if(years.length<=2){
       datasets = years.map((y,i)=>{
         const byMonth = Array.from({length:12},(_,m)=>sum(data.filter(r=>r.year===y && r.month===m+1), r=>r.revenue));
         return {label:String(y), data:byMonth, borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false};
       });
-      renderChart('trendChart', TH_MONTHS_SHORT, datasets, 'trendLegend');
+      renderChart('trendChart', TH_MONTHS_FULL, datasets, 'trendLegend');
       return;
     } else {
       datasets = [{label:'รวมทั้งหมด', data:months.map(m=>sum(data.filter(r=>r.year_month===m), r=>r.revenue)), borderColor:SERIES[0], backgroundColor:SERIES[0]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:true}];
@@ -512,7 +512,7 @@ function getFilteredExceptYear(){
 let yearlyChartObj=null;
 function renderYearlyChart(){
   const data = getFilteredExceptYear();
-  const years = [...new Set(data.map(r=>r.year))].sort();
+  const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
   const totals = years.map(y=>sum(data.filter(r=>r.year===y), r=>r.revenue));
   if(yearlyChartObj) yearlyChartObj.destroy();
   yearlyChartObj = new Chart(document.getElementById('yearlyChart'), {
@@ -606,7 +606,7 @@ function setTopSort(col){ topSort.dir = topSort.col===col? -topSort.dir : -1; to
 function populateCompYearSelect(){
   const sel = document.getElementById('compYear');
   if(!sel) return;
-  const years = [...new Set(masterData.map(r=>r.year))].sort();
+  const years = [...new Set(masterData.map(r=>r.year))].sort((a,b)=>a-b);
   const prev = compYear;
   sel.innerHTML = '<option value="all">ทุกปี</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
   compYear = (prev==='all' || years.map(String).includes(prev)) ? prev : 'all';
@@ -643,7 +643,7 @@ function renderCompChart(){
   if(compYear !== 'all'){
     // Single year selected: show 12 real months instead of a "YYYY-MM" x-axis.
     data = data.filter(r=>String(r.year)===String(compYear));
-    labels = TH_MONTHS_SHORT;
+    labels = TH_MONTHS_FULL;
     datasets = [...compSelected].map((val,i)=>{
       const byMonth = Array.from({length:12},()=>0);
       data.filter(r=>r[field]===val).forEach(r=>{ byMonth[r.month-1] += r.revenue; });
@@ -670,13 +670,13 @@ function renderCompChart(){
 /* ============ HEATMAP ============ */
 function renderHeatmap(){
   const data = getFiltered();
-  const years = [...new Set(data.map(r=>r.year))].sort();
+  const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
   const grid = {};
   let max=0;
   for(let m=1;m<=12;m++){ grid[m]={}; years.forEach(y=>{ const v = sum(data.filter(r=>r.year===y&&r.month===m),r=>r.revenue); grid[m][y]=v; if(v>max) max=v; }); }
   let html = '<table class="heat-table"><thead><tr><th>เดือน</th>'+years.map(y=>`<th>${y}</th>`).join('')+'</tr></thead><tbody>';
   for(let m=1;m<=12;m++){
-    html += `<tr><td style="text-align:left;color:var(--text-mut);">ม${m}</td>`;
+    html += `<tr><td style="text-align:left;color:var(--text-mut);">${TH_MONTHS_FULL[m-1]}</td>`;
     years.forEach(y=>{
       const v = grid[m][y]; const ratio = max? v/max : 0;
       const bg = `rgba(42,120,214,${(0.06+ratio*0.75).toFixed(2)})`;
@@ -731,14 +731,12 @@ function renderAll(){
     document.getElementById('kpiRow').innerHTML = '<div class="card empty" style="grid-column:1/-1;">ไม่มีข้อมูล — ตรวจสอบการตั้งค่า Apps Script หรืออัปโหลดไฟล์ที่ปุ่ม "อัปโหลดไฟล์ (สำรอง)"</div>';
     return;
   }
-  renderKPI();
-  renderTrend();
-  renderYearlyChart();
-  renderChannelCharts();
-  renderTopProducts();
-  renderCompChart();
-  renderHeatmap();
-  renderDetailTable();
+  // Each chart renders independently — if one throws (bad data, missing DOM node, etc.)
+  // it's logged to the console instead of aborting every chart that comes after it.
+  const steps = [renderKPI, renderTrend, renderYearlyChart, renderChannelCharts, renderTopProducts, renderCompChart, renderHeatmap, renderDetailTable];
+  for(const step of steps){
+    try{ step(); }catch(e){ console.error('renderAll: ' + step.name + ' failed', e); }
+  }
 }
 
 /* ============ INIT ============ */
