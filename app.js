@@ -542,6 +542,18 @@ function groupSum(data, field){
   data.forEach(r=>m.set(r[field], (m.get(r[field])||0)+r.revenue));
   return [...m.entries()].sort((a,b)=>b[1]-a[1]);
 }
+// Charts with many distinct values (e.g. dozens of product categories) become unreadable —
+// rotated/overlapping axis labels, or bars too thin to click. This keeps the top N by revenue
+// and folds everything else into a single "other" bucket, returning which raw keys that
+// bucket represents so a click on it can still filter to the right underlying rows.
+function topNGroup(pairs, n, otherLabel){
+  if(pairs.length<=n) return {items:pairs, otherKeys:null};
+  const top = pairs.slice(0,n);
+  const rest = pairs.slice(n);
+  const restSum = rest.reduce((s,x)=>s+x[1],0);
+  const otherKeys = rest.map(x=>x[0]);
+  return {items: restSum>0 ? [...top,[otherLabel,restSum]] : top, otherKeys};
+}
 function renderChannelCharts(){
   const data = getFiltered();
   const g = groupSum(data,'channel');
@@ -560,14 +572,26 @@ function renderChannelCharts(){
     data:{labels:g.map(x=>x[0]), datasets:[{data:g.map(x=>x[1]), backgroundColor:g.map((_,i)=>SERIES[i%SERIES.length])}]},
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10, font:{size:11}}}, tooltip:{callbacks:{label:c=>c.label+': '+fmtTHB(c.raw)}}}}
   });
-  const gc = groupSum(data,'category');
+  const gcRaw = groupSum(data,'category');
+  const catGrouped = topNGroup(gcRaw, 10, 'อื่นๆ');
+  const gc = catGrouped.items;
   if(categoryBarObj) categoryBarObj.destroy();
   categoryBarObj = new Chart(document.getElementById('categoryBar'), {
     type:'bar',
-    data:{labels:gc.map(x=>x[0]), datasets:[{data:gc.map(x=>x[1]), backgroundColor:SERIES[2], borderRadius:4}]},
-    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtTHB(c.raw)}}},
-      onClick:(e,els)=>{ if(els.length){ const cat=gc[els[0].index][0]; filters.categories = filters.categories.has(cat)&&filters.categories.size===1? new Set(): new Set([cat]); refreshFilterOptions(); renderAll(); } },
-      scales:{x:{ticks:{color:'#1c2b3a',font:{size:10}, autoSkip:false, maxRotation:40}, grid:{display:false}}, y:{ticks:{color:'#647388', callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}}}
+    data:{labels:gc.map(x=>x[0]), datasets:[{data:gc.map(x=>x[1]), backgroundColor:gc.map(x=>x[0]==='อื่นๆ'?'#98a3b3':SERIES[2]), borderRadius:4}]},
+    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmtTHB(c.raw)}}},
+      onClick:(e,els)=>{
+        if(!els.length) return;
+        const label = gc[els[0].index][0];
+        if(label==='อื่นๆ' && catGrouped.otherKeys){
+          const same = filters.categories.size===catGrouped.otherKeys.length && catGrouped.otherKeys.every(k=>filters.categories.has(k));
+          filters.categories = same ? new Set() : new Set(catGrouped.otherKeys);
+        } else {
+          filters.categories = filters.categories.has(label)&&filters.categories.size===1? new Set(): new Set([label]);
+        }
+        refreshFilterOptions(); renderAll();
+      },
+      scales:{x:{ticks:{color:'#647388', callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}, y:{ticks:{color:'#1c2b3a',font:{size:11}}, grid:{display:false}}}}
   });
   const gs = groupSum(data,'status');
   if(statusDonutObj) statusDonutObj.destroy();
