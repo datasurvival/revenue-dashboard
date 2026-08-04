@@ -82,6 +82,17 @@
     <div class="legend" id="trendLegend"></div>
   </section>
 
+  <section class="card">
+    <div class="panel-title">
+      <span>ยอดขายรายปี (Yearly Comparison)</span>
+    </div>
+    <div style="position:relative;height:240px;"><canvas id="yearlyChart" role="img" aria-label="กราฟแท่งยอดขายรายปี"></canvas></div>
+    <div class="note" style="margin-top:10px;margin-bottom:0;">
+      กราฟนี้แสดงยอดขายทุกปีเสมอ (ไม่ผูกกับตัวกรอง "ปี" ด้านบน) เพื่อให้เปรียบเทียบระหว่างปีได้ง่าย —
+      คลิกที่แท่งเพื่อกรองข้อมูลทั้งหน้าให้เหลือเฉพาะปีนั้น
+    </div>
+  </section>
+
   <section class="grid-2">
     <div class="card">
       <div class="panel-title"><span>ยอดขายแยกตามช่องทาง</span></div>
@@ -118,6 +129,11 @@
           <option value="channel">ช่องทาง</option>
           <option value="category">หมวดหมู่</option>
           <option value="product">สินค้า</option>
+        </select>
+      </div>
+      <div class="field"><label>ปี</label>
+        <select id="compYear" onchange="onCompYearChange()">
+          <option value="all">ทุกปี</option>
         </select>
       </div>
       <div class="field" style="flex:1;"><label>เลือกรายการ (สูงสุด 5)</label>

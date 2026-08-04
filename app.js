@@ -30,6 +30,13 @@ const OPTIONAL = [
 const TEXT_FALLBACK = ['category','channel','customer','status'];
 const MAX_BAD_ROW_RATIO = 0.2; // reject whole file if >20% rows fail to coerce
 const SERIES = ['#2a78d6','#e8792a','#1baf7a','#eda100','#e87ba4','#3a8a3a','#6a4ab7','#e34948'];
+const TH_MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+// '2024-01' -> 'ม.ค. 2024'
+function formatYearMonth(ym){
+  const [y,m] = String(ym).split('-');
+  return TH_MONTHS_SHORT[parseInt(m,10)-1] + ' ' + y;
+}
+const LS_KEY = 'salesDashboard_cache_v1'; // localStorage key for the last successfully-synced dataset
 
 /* ============ STATE ============ */
 let backendData = [];         // rows synced automatically from Google Drive via Apps Script
@@ -43,6 +50,7 @@ let lastSyncOk = false;
 let filters = { start:null, end:null, years:new Set(), channels:new Set(), categories:new Set(), skus:new Set(), status:new Set() };
 let trendMode = 'total';
 let compMode = 'channel';
+let compYear = 'all';
 let compSelected = new Set();
 let detailPage = 1;
 const PAGE_SIZE = 20;
@@ -249,9 +257,27 @@ function reviveBackendRow(r){
   return Object.assign({}, r, { date: new Date(r.date) });
 }
 
+// Cache the last successfully-synced dataset in the browser so a page reload (or a temporary
+// network hiccup) shows real data again instead of falling back to the demo dataset.
+function saveSyncCache(fileCount, syncedAtISO){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify({ data: backendData, syncedAt: syncedAtISO || new Date().toISOString(), fileCount: fileCount||0 }));
+  }catch(e){ /* storage unavailable (quota / private browsing) — not critical, just skip caching */ }
+}
+function loadSyncCache(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || !Array.isArray(parsed.data) || !parsed.data.length) return null;
+    parsed.data = parsed.data.map(reviveBackendRow);
+    return parsed;
+  }catch(e){ return null; }
+}
+
 async function fetchFromBackend(){
   if(!CONFIG.API_URL){
-    setSyncInfo('ยังไม่ได้ตั้งค่า API_URL ใน config.js — กำลังแสดงข้อมูลตัวอย่าง (Demo)');
+    if(!backendData.length) setSyncInfo('ยังไม่ได้ตั้งค่า API_URL ใน config.js — กำลังแสดงข้อมูลตัวอย่าง (Demo)');
     return;
   }
   toggleRefreshBtn(true);
@@ -263,12 +289,15 @@ async function fetchFromBackend(){
     if(!json.ok) throw new Error(json.error || 'ไม่ทราบสาเหตุ');
     backendData = (json.data || []).map(reviveBackendRow);
     lastSyncOk = true;
-    const syncedAt = json.syncedAt ? new Date(json.syncedAt).toLocaleString('th-TH') : new Date().toLocaleString('th-TH');
-    setSyncInfo(`ซิงก์ล่าสุด: ${syncedAt} · ${json.fileCount||0} ไฟล์ · ${backendData.length.toLocaleString('th-TH')} แถว`);
+    const syncedAtDate = json.syncedAt ? new Date(json.syncedAt) : new Date();
+    setSyncInfo(`ซิงก์ล่าสุด: ${syncedAtDate.toLocaleString('th-TH')} · ${json.fileCount||0} ไฟล์ · ${backendData.length.toLocaleString('th-TH')} แถว`);
+    saveSyncCache(json.fileCount||0, syncedAtDate.toISOString());
     rebuildMasterData();
   }catch(e){
     lastSyncOk = false;
-    setSyncInfo('เชื่อมต่อ Apps Script ไม่สำเร็จ: ' + e.message + ' — แสดงข้อมูลตัวอย่าง (Demo) แทน');
+    // Keep whatever backendData we already had (cached-from-last-visit or freshly synced) —
+    // only drop to the demo dataset if we truly have nothing.
+    setSyncInfo('เชื่อมต่อ Apps Script ไม่สำเร็จ: ' + e.message + (backendData.length ? ' — แสดงข้อมูลที่ซิงก์ไว้ล่าสุด' : ' — แสดงข้อมูลตัวอย่าง (Demo) แทน'));
     rebuildMasterData();
   }finally{
     toggleRefreshBtn(false);
@@ -433,7 +462,7 @@ function renderTrend(){
         const byMonth = Array.from({length:12},(_,m)=>sum(data.filter(r=>r.year===y && r.month===m+1), r=>r.revenue));
         return {label:String(y), data:byMonth, borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false};
       });
-      renderChart('trendChart', Array.from({length:12},(_,i)=>`ม${i+1}`), datasets, 'trendLegend');
+      renderChart('trendChart', TH_MONTHS_SHORT, datasets, 'trendLegend');
       return;
     } else {
       datasets = [{label:'รวมทั้งหมด', data:months.map(m=>sum(data.filter(r=>r.year_month===m), r=>r.revenue)), borderColor:SERIES[0], backgroundColor:SERIES[0]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:true}];
@@ -448,7 +477,7 @@ function renderTrend(){
       borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:1, fill:false
     }));
   }
-  renderChart('trendChart', months, datasets, 'trendLegend');
+  renderChart('trendChart', months.map(formatYearMonth), datasets, 'trendLegend');
 }
 function renderChart(canvasId, labels, datasets, legendId){
   const ctx = document.getElementById(canvasId);
@@ -464,6 +493,46 @@ function renderChart(canvasId, labels, datasets, legendId){
   if(legendId){
     document.getElementById(legendId).innerHTML = datasets.map((d,i)=>`<span><span class="dot" style="background:${d.borderColor}"></span>${d.label}</span>`).join('');
   }
+}
+
+/* ============ YEARLY REVENUE COMPARISON ============ */
+// Uses every filter EXCEPT the "ปี" (year) filter itself, so all years stay visible
+// side-by-side no matter which year(s) happen to be selected elsewhere on the page.
+function getFilteredExceptYear(){
+  return masterData.filter(r=>{
+    if(filters.start && r.date < filters.start) return false;
+    if(filters.end && r.date > filters.end) return false;
+    if(filters.channels.size && !filters.channels.has(r.channel)) return false;
+    if(filters.categories.size && !filters.categories.has(r.category)) return false;
+    if(filters.skus.size && !filters.skus.has(r.product_name)) return false;
+    if(filters.status.size && !filters.status.has(r.status)) return false;
+    return true;
+  });
+}
+let yearlyChartObj=null;
+function renderYearlyChart(){
+  const data = getFilteredExceptYear();
+  const years = [...new Set(data.map(r=>r.year))].sort();
+  const totals = years.map(y=>sum(data.filter(r=>r.year===y), r=>r.revenue));
+  if(yearlyChartObj) yearlyChartObj.destroy();
+  yearlyChartObj = new Chart(document.getElementById('yearlyChart'), {
+    type:'bar',
+    data:{labels:years.map(String), datasets:[{
+      data:totals,
+      backgroundColor:years.map(y=>filters.years.has(String(y)) ? SERIES[1] : SERIES[0]),
+      borderRadius:6, maxBarThickness:70
+    }]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:(c)=>{
+        const i = c.dataIndex, cur = totals[i], prev = i>0 ? totals[i-1] : null;
+        let extra = '';
+        if(prev){ const pct = (cur-prev)/prev*100; extra = ' ('+(pct>=0?'▲':'▼')+' '+Math.abs(pct).toFixed(1)+'% เทียบปีก่อน)'; }
+        return fmtTHB(cur)+extra;
+      }}}},
+      onClick:(e,els)=>{ if(els.length){ const y=String(years[els[0].index]); filters.years = filters.years.has(y)&&filters.years.size===1? new Set(): new Set([y]); refreshFilterOptions(); renderAll(); } },
+      scales:{x:{ticks:{color:'#1c2b3a',font:{size:12,weight:600}}, grid:{display:false}},
+              y:{ticks:{color:'#647388', callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}}}
+  });
 }
 
 /* ============ CHANNEL / CATEGORY CHARTS ============ */
@@ -534,6 +603,19 @@ function renderTopProducts(){
 function setTopSort(col){ topSort.dir = topSort.col===col? -topSort.dir : -1; topSort.col=col; renderTopProducts(); }
 
 /* ============ COMPARISON CHART ============ */
+function populateCompYearSelect(){
+  const sel = document.getElementById('compYear');
+  if(!sel) return;
+  const years = [...new Set(masterData.map(r=>r.year))].sort();
+  const prev = compYear;
+  sel.innerHTML = '<option value="all">ทุกปี</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  compYear = (prev==='all' || years.map(String).includes(prev)) ? prev : 'all';
+  sel.value = compYear;
+}
+function onCompYearChange(){
+  compYear = document.getElementById('compYear').value;
+  renderCompChart();
+}
 function rebuildCompList(){
   const data = masterData;
   const field = compMode = document.getElementById('compMode').value;
@@ -543,6 +625,7 @@ function rebuildCompList(){
   compSelected = new Set([...compSelected].filter(v=>opts.includes(v)));
   const list = document.getElementById('compList');
   list.innerHTML = opts.map(o=>`<label><input type="checkbox" ${compSelected.has(o)?'checked':''} onchange="toggleComp('${o.replace(/'/g,"\\'")}',this)">${o}</label>`).join('') || '<div class="empty">ไม่พบรายการ</div>';
+  populateCompYearSelect();
   renderCompChart();
 }
 function toggleComp(val, cb){
@@ -554,16 +637,30 @@ function toggleComp(val, cb){
 }
 let compChartObj=null;
 function renderCompChart(){
-  const data = getFiltered();
+  let data = getFiltered();
   const field = compMode==='product' ? 'product_name' : compMode;
-  const months = [...new Set(data.map(r=>r.year_month))].sort();
-  const datasets = [...compSelected].map((val,i)=>({
-    label:val, data:months.map(m=>sum(data.filter(r=>r.year_month===m && r[field]===val), r=>r.revenue)),
-    borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false
-  }));
+  let labels, datasets;
+  if(compYear !== 'all'){
+    // Single year selected: show 12 real months instead of a "YYYY-MM" x-axis.
+    data = data.filter(r=>String(r.year)===String(compYear));
+    labels = TH_MONTHS_SHORT;
+    datasets = [...compSelected].map((val,i)=>{
+      const byMonth = Array.from({length:12},()=>0);
+      data.filter(r=>r[field]===val).forEach(r=>{ byMonth[r.month-1] += r.revenue; });
+      return {label:val, data:byMonth, borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false};
+    });
+  } else {
+    // Multiple years: keep a month-by-month timeline, but label it as "ม.ค. 2024" instead of "2024-01".
+    const months = [...new Set(data.map(r=>r.year_month))].sort();
+    labels = months.map(formatYearMonth);
+    datasets = [...compSelected].map((val,i)=>({
+      label:val, data:months.map(m=>sum(data.filter(r=>r.year_month===m && r[field]===val), r=>r.revenue)),
+      borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false
+    }));
+  }
   if(compChartObj) compChartObj.destroy();
   compChartObj = new Chart(document.getElementById('compChart'), {
-    type:'line', data:{labels:months, datasets},
+    type:'line', data:{labels, datasets},
     options:{responsive:true, maintainAspectRatio:false,
       plugins:{legend:{position:'bottom', labels:{boxWidth:10,font:{size:11}}}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtTHB(c.raw)}}},
       scales:{x:{ticks:{color:'#647388',font:{size:10}}, grid:{display:false}}, y:{ticks:{color:'#647388',callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}}}
@@ -636,6 +733,7 @@ function renderAll(){
   }
   renderKPI();
   renderTrend();
+  renderYearlyChart();
   renderChannelCharts();
   renderTopProducts();
   renderCompChart();
@@ -651,8 +749,13 @@ function renderAll(){
     if(btns[1]) btns[1].style.display = 'none';
   }
   initManualUpload();
-  masterData = genDemoData(); // shown immediately while the first sync is in flight
-  onDataChanged();
+  const cached = loadSyncCache();
+  if(cached){
+    backendData = cached.data;
+    lastSyncOk = true;
+    setSyncInfo(`ข้อมูลที่ซิงก์ไว้ล่าสุด: ${new Date(cached.syncedAt).toLocaleString('th-TH')} · ${cached.fileCount||0} ไฟล์ · ${cached.data.length.toLocaleString('th-TH')} แถว (กำลังซิงก์ข้อมูลใหม่ในพื้นหลัง...)`);
+  }
+  rebuildMasterData(); // shows cached data immediately if we have it; otherwise falls back to demo data
   fetchFromBackend();
   startAutoRefresh();
 })();

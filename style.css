@@ -27,6 +27,10 @@
   .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
   .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
   @media (max-width:900px){.grid-2,.grid-4{grid-template-columns:1fr;}}
+  /* Grid items default to a content-based min-width, so a wide table (long product names,
+     white-space:nowrap cells) can force the card past its column instead of scrolling inside it. */
+  .grid-2 > .card, .grid-4 > .card{min-width:0;}
+  .tblwrap{width:100%;overflow-x:auto;}
 
   /* datasource panel */
   #datasource{margin-top:14px;}
