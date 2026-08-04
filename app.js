@@ -674,12 +674,13 @@ function renderCompChart(){
       return {label:val, data:byMonth, borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false};
     });
   } else {
-    // Multiple years: keep a month-by-month timeline, but label it as "ม.ค. 2024" instead of "2024-01".
-    const months = [...new Set(data.map(r=>r.year_month))].sort();
-    labels = months.map(formatYearMonth);
+    // "ทุกปี": aggregate to one point per year (e.g. 2020, 2026) instead of a crowded
+    // month-by-month timeline across every year — that's what the year picker is for.
+    const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
+    labels = years.map(String);
     datasets = [...compSelected].map((val,i)=>({
-      label:val, data:months.map(m=>sum(data.filter(r=>r.year_month===m && r[field]===val), r=>r.revenue)),
-      borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false
+      label:val, data:years.map(y=>sum(data.filter(r=>r.year===y && r[field]===val), r=>r.revenue)),
+      borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:4, fill:false
     }));
   }
   if(compChartObj) compChartObj.destroy();
