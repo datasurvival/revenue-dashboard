@@ -31,10 +31,9 @@ const TEXT_FALLBACK = ['category','channel','customer','status'];
 const MAX_BAD_ROW_RATIO = 0.2; // reject whole file if >20% rows fail to coerce
 const SERIES = ['#2a78d6','#e8792a','#1baf7a','#eda100','#e87ba4','#3a8a3a','#6a4ab7','#e34948'];
 const TH_MONTHS_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-// '2024-01' -> 'มกราคม 2024'
-function formatYearMonth(ym){
-  const [y,m] = String(ym).split('-');
-  return TH_MONTHS_FULL[parseInt(m,10)-1] + ' ' + y;
+// '2024-01' -> 'มกราคม' (no year — used where the axis should read as month names only)
+function monthNameOnly(ym){
+  return TH_MONTHS_FULL[parseInt(String(ym).split('-')[1],10)-1];
 }
 const LS_KEY = 'salesDashboard_cache_v1'; // localStorage key for the last successfully-synced dataset
 
@@ -50,7 +49,6 @@ let lastSyncOk = false;
 let filters = { start:null, end:null, years:new Set(), channels:new Set(), categories:new Set(), skus:new Set(), status:new Set() };
 let trendMode = 'total';
 let compMode = 'channel';
-let compYear = 'all';
 let compSelected = new Set();
 let detailPage = 1;
 const PAGE_SIZE = 20;
@@ -477,7 +475,7 @@ function renderTrend(){
       borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:1, fill:false
     }));
   }
-  renderChart('trendChart', months.map(formatYearMonth), datasets, 'trendLegend');
+  renderChart('trendChart', months.map(monthNameOnly), datasets, 'trendLegend');
 }
 function renderChart(canvasId, labels, datasets, legendId){
   const ctx = document.getElementById(canvasId);
@@ -626,20 +624,7 @@ function renderTopProducts(){
 }
 function setTopSort(col){ topSort.dir = topSort.col===col? -topSort.dir : -1; topSort.col=col; renderTopProducts(); }
 
-/* ============ COMPARISON CHART ============ */
-function populateCompYearSelect(){
-  const sel = document.getElementById('compYear');
-  if(!sel) return;
-  const years = [...new Set(masterData.map(r=>r.year))].sort((a,b)=>a-b);
-  const prev = compYear;
-  sel.innerHTML = '<option value="all">ทุกปี</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
-  compYear = (prev==='all' || years.map(String).includes(prev)) ? prev : 'all';
-  sel.value = compYear;
-}
-function onCompYearChange(){
-  compYear = document.getElementById('compYear').value;
-  renderCompChart();
-}
+/* ============ COMPARISON CHART (always yearly: x-axis = years, one line per selected item) ============ */
 function rebuildCompList(){
   const data = masterData;
   const field = compMode = document.getElementById('compMode').value;
@@ -649,7 +634,6 @@ function rebuildCompList(){
   compSelected = new Set([...compSelected].filter(v=>opts.includes(v)));
   const list = document.getElementById('compList');
   list.innerHTML = opts.map(o=>`<label><input type="checkbox" ${compSelected.has(o)?'checked':''} onchange="toggleComp('${o.replace(/'/g,"\\'")}',this)">${o}</label>`).join('') || '<div class="empty">ไม่พบรายการ</div>';
-  populateCompYearSelect();
   renderCompChart();
 }
 function toggleComp(val, cb){
@@ -661,34 +645,20 @@ function toggleComp(val, cb){
 }
 let compChartObj=null;
 function renderCompChart(){
-  let data = getFiltered();
+  const data = getFiltered();
   const field = compMode==='product' ? 'product_name' : compMode;
-  let labels, datasets;
-  if(compYear !== 'all'){
-    // Single year selected: show 12 real months instead of a "YYYY-MM" x-axis.
-    data = data.filter(r=>String(r.year)===String(compYear));
-    labels = TH_MONTHS_FULL;
-    datasets = [...compSelected].map((val,i)=>{
-      const byMonth = Array.from({length:12},()=>0);
-      data.filter(r=>r[field]===val).forEach(r=>{ byMonth[r.month-1] += r.revenue; });
-      return {label:val, data:byMonth, borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:2, fill:false};
-    });
-  } else {
-    // "ทุกปี": aggregate to one point per year (e.g. 2020, 2026) instead of a crowded
-    // month-by-month timeline across every year — that's what the year picker is for.
-    const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
-    labels = years.map(String);
-    datasets = [...compSelected].map((val,i)=>({
-      label:val, data:years.map(y=>sum(data.filter(r=>r.year===y && r[field]===val), r=>r.revenue)),
-      borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:4, fill:false
-    }));
-  }
+  const years = [...new Set(data.map(r=>r.year))].sort((a,b)=>a-b);
+  const labels = years.map(String);
+  const datasets = [...compSelected].map((val,i)=>({
+    label:val, data:years.map(y=>sum(data.filter(r=>r.year===y && r[field]===val), r=>r.revenue)),
+    borderColor:SERIES[i%SERIES.length], backgroundColor:SERIES[i%SERIES.length]+'22', tension:.3, borderWidth:2, pointRadius:4, fill:false
+  }));
   if(compChartObj) compChartObj.destroy();
   compChartObj = new Chart(document.getElementById('compChart'), {
     type:'line', data:{labels, datasets},
     options:{responsive:true, maintainAspectRatio:false,
       plugins:{legend:{position:'bottom', labels:{boxWidth:10,font:{size:11}}}, tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmtTHB(c.raw)}}},
-      scales:{x:{ticks:{color:'#647388',font:{size:10}}, grid:{display:false}}, y:{ticks:{color:'#647388',callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}}}
+      scales:{x:{ticks:{color:'#1c2b3a',font:{size:12,weight:600}}, grid:{display:false}}, y:{ticks:{color:'#647388',callback:v=>fmtTHB(v)}, grid:{color:'#eef1f5'}}}}
   });
 }
 

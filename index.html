@@ -123,18 +123,13 @@
   </section>
 
   <section class="card">
-    <div class="panel-title"><span>กราฟเปรียบเทียบ (เลือกได้เอง สูงสุด 5 รายการ)</span></div>
+    <div class="panel-title"><span>กราฟเปรียบเทียบรายปี (เลือกได้เอง สูงสุด 5 รายการ)</span></div>
     <div class="field-row">
       <div class="field"><label>เปรียบเทียบตาม</label>
         <select id="compMode" onchange="rebuildCompList()">
           <option value="channel">ช่องทาง</option>
           <option value="category">หมวดหมู่</option>
           <option value="product">สินค้า</option>
-        </select>
-      </div>
-      <div class="field"><label>ปี</label>
-        <select id="compYear" onchange="onCompYearChange()">
-          <option value="all">ทุกปี</option>
         </select>
       </div>
       <div class="field" style="flex:1;"><label>เลือกรายการ (สูงสุด 5)</label>
